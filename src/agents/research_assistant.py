@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Literal
 
-from langchain_community.tools import DuckDuckGoSearchResults, OpenWeatherMapQueryRun
+from langchain_community.tools import OpenWeatherMapQueryRun
+from langchain_core.tools import tool
+from ddgs import DDGS
 from langchain_community.utilities import OpenWeatherMapAPIWrapper
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, SystemMessage
@@ -25,7 +27,30 @@ class AgentState(MessagesState, total=False):
     remaining_steps: RemainingSteps
 
 
-web_search = DuckDuckGoSearchResults(name="WebSearch")
+@tool("WebSearch")
+def web_search(query: str) -> str:
+    """Search the web for recent information. Input should be a search query."""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=5))
+
+        if not results:
+            return "WebSearch 没有找到相关结果。"
+
+        output = []
+        for i, r in enumerate(results, start=1):
+            title = r.get("title", "")
+            url = r.get("href") or r.get("url", "")
+            body = r.get("body", "")
+            output.append(f"{i}. {title}\n链接：{url}\n摘要：{body}")
+
+        return "\n\n".join(output)
+
+    except Exception as e:
+        return (
+            f"WebSearch 工具调用失败：{type(e).__name__}: {e}\n"
+            "请基于已有知识回答，并明确说明本次未能成功联网检索。"
+        )
 tools = [web_search, calculator]
 
 # Add weather tool if API key is set
