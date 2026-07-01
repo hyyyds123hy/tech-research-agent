@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.pregel import Pregel
-
+from agents.tech_research_agent import tech_research_agent
 from agents.bg_task_agent.bg_task_agent import bg_task_agent
 from agents.chatbot import chatbot
 from agents.command_agent import command_agent
@@ -16,7 +16,7 @@ from agents.rag_assistant import rag_assistant
 from agents.research_assistant import research_assistant
 from schema import AgentInfo
 
-DEFAULT_AGENT = "research-assistant"
+DEFAULT_AGENT = "tech-research-agent"
 
 # Type alias to handle LangGraph's different agent patterns
 # - @entrypoint functions return Pregel
@@ -37,6 +37,10 @@ agents: dict[str, Agent] = {
         description="A research assistant with web search and calculator.",
         graph_like=research_assistant,
     ),
+    "tech-research-agent": Agent(
+    description="A technical research report agent with web search and structured analysis.",
+    graph_like=tech_research_agent,
+),
     "rag-assistant": Agent(
         description="A RAG assistant with access to information in a database.",
         graph_like=rag_assistant,
