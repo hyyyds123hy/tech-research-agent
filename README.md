@@ -159,7 +159,23 @@ tech-research-agent
 DEFAULT_AGENT = "tech-research-agent"
 ```
 
+##  Reviewer 工作流
+
+本项目在 v0.2 中新增 Reviewer 节点，用于对技术调研报告进行质量检查和优化。
+
+工作流程：
+
+```text
+用户输入技术主题
+    ↓
+tech-research-agent 生成报告初稿
+    ↓
+Reviewer 检查报告结构、技术深度、风险分析和表达质量
+    ↓
+输出优化后的最终技术调研报告
+
 ---
+
 
 ## 6. 运行方式
 
