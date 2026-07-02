@@ -25,6 +25,7 @@ class AgentState(MessagesState, total=False):
 
     safety: SafeguardOutput
     remaining_steps: RemainingSteps
+    draft_report: str
 
 
 @tool("WebSearch")
@@ -74,6 +75,24 @@ instructions = f"""
     - Use calculator tool with numexpr to answer math questions. The user does not understand numexpr,
       so for the final response, use human readable format - e.g. "300 * 200", not "(300 \\times 200)".
     """
+reviewer_instructions = """
+你是一个技术报告 Reviewer，负责检查和优化技术调研报告。
+
+你的任务：
+1. 检查报告结构是否完整。
+2. 检查内容是否具体，避免空泛表达。
+3. 检查技术实现思路是否有工程化细节。
+4. 检查是否包含优势、局限、风险和落地难点。
+5. 检查语言是否清晰、专业、适合中文技术报告。
+6. 如果报告质量不够，请直接优化成最终版本。
+
+最终输出要求：
+- 只输出最终优化后的报告。
+- 不要输出“这是初稿”。
+- 不要输出你的审查过程。
+- 可以在报告末尾增加一个简短的“Reviewer 检查结果”。
+- 使用中文。
+"""
 
 
 def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessage]:
@@ -99,16 +118,52 @@ async def acall_model(state: AgentState, config: RunnableConfig) -> AgentState:
 
     if state["remaining_steps"] < 2 and response.tool_calls:
         return {
+            "draft_report": "抱歉，本次任务需要更多步骤才能完成，无法生成完整技术调研报告。",
+            "messages": [],
+        }
+
+    if response.tool_calls:
+        return {"messages": [response]}
+
+    return {
+        "draft_report": response.content,
+        "messages": [],
+    }
+
+
+async def review_report(state: AgentState, config: RunnableConfig) -> AgentState:
+    draft_report = state.get("draft_report", "")
+
+    if not draft_report:
+        return {
             "messages": [
-                AIMessage(
-                    id=response.id,
-                    content="Sorry, need more steps to process this request.",
-                )
+                AIMessage(content="抱歉，本次没有生成可供 Reviewer 检查的报告内容。")
             ]
         }
-    # We return a list, because this will get added to the existing list
-    return {"messages": [response]}
 
+    m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+
+    review_prompt = f"""
+{reviewer_instructions}
+
+以下是待检查和优化的技术调研报告初稿：
+
+{draft_report}
+"""
+
+    response = await m.ainvoke([SystemMessage(content=review_prompt)], config)
+
+    final_content = response.content
+
+    if "Reviewer 检查结果" not in final_content:
+        final_content = (
+            final_content
+            + "\n\n---\n\n"
+            + "### Reviewer 检查结果\n\n"
+            + "已完成结构完整性、技术深度、风险分析和表达质量检查。"
+        )
+
+    return {"messages": [AIMessage(content=final_content)]}
 
 async def safeguard_input(state: AgentState, config: RunnableConfig) -> AgentState:
     safeguard = Safeguard()
@@ -124,6 +179,7 @@ async def block_unsafe_content(state: AgentState, config: RunnableConfig) -> Age
 # Define the graph
 agent = StateGraph(AgentState)
 agent.add_node("model", acall_model)
+agent.add_node("reviewer", review_report)
 agent.add_node("tools", ToolNode(tools))
 agent.add_node("guard_input", safeguard_input)
 agent.add_node("block_unsafe_content", block_unsafe_content)
@@ -152,16 +208,21 @@ agent.add_edge("tools", "model")
 
 
 # After "model", if there are tool calls, run "tools". Otherwise END.
-def pending_tool_calls(state: AgentState) -> Literal["tools", "done"]:
+def pending_tool_calls(state: AgentState) -> Literal["tools", "reviewer"]:
     last_message = state["messages"][-1]
-    if not isinstance(last_message, AIMessage):
-        raise TypeError(f"Expected AIMessage, got {type(last_message)}")
-    if last_message.tool_calls:
+
+    if isinstance(last_message, AIMessage) and last_message.tool_calls:
         return "tools"
-    return "done"
+
+    return "reviewer"
 
 
-agent.add_conditional_edges("model", pending_tool_calls, {"tools": "tools", "done": END})
+agent.add_conditional_edges(
+    "model",
+    pending_tool_calls,
+    {"tools": "tools", "reviewer": "reviewer"},
+)
 
+agent.add_edge("reviewer", END)
 
 tech_research_agent = agent.compile()
